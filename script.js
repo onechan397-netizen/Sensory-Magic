@@ -10,8 +10,53 @@ function initAudio() {
     }
 }
 
+// 嫌な音（黒板をひっかく音）を生成する関数
+function playScreech(x, y) {
+    const pan = (x / window.innerWidth) * 2 - 1;
+    
+    const osc1 = audioCtx.createOscillator();
+    const osc2 = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+    
+    // 黒板を引っ掻くような不協和音と高い周波数
+    const baseFreq = 2500 + Math.random() * 1500;
+    osc1.type = 'sawtooth';
+    osc1.frequency.setValueAtTime(baseFreq, audioCtx.currentTime);
+    osc1.frequency.exponentialRampToValueAtTime(baseFreq + 800, audioCtx.currentTime + 0.1);
+    
+    osc2.type = 'square';
+    osc2.frequency.setValueAtTime(baseFreq * 1.15, audioCtx.currentTime); // 不協和音
+    
+    gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+    gainNode.gain.linearRampToValueAtTime(0.1, audioCtx.currentTime + 0.02); // 鋭い立ち上がり
+    gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4); // すぐ消える
+    
+    osc1.connect(gainNode);
+    osc2.connect(gainNode);
+
+    if (audioCtx.createStereoPanner) {
+        const panner = audioCtx.createStereoPanner();
+        panner.pan.value = pan;
+        gainNode.connect(panner);
+        panner.connect(audioCtx.destination);
+    } else {
+        gainNode.connect(audioCtx.destination);
+    }
+    
+    osc1.start();
+    osc2.start();
+    osc1.stop(audioCtx.currentTime + 0.5);
+    osc2.stop(audioCtx.currentTime + 0.5);
+}
+
 function playNote(x, y) {
     if (!audioCtx || audioCtx.state === 'suspended') return;
+    
+    // モード2（釘モード）の時は嫌な音を鳴らす
+    if (currentMode === 2) {
+        playScreech(x, y);
+        return;
+    }
     
     // Y座標で音階を決定 (上が高い音)
     const index = Math.floor((1 - (y / window.innerHeight)) * pentatonicScale.length);
@@ -61,14 +106,16 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
-// モード設定 (0: キラキラ, 1: ぽわぽわバブル)
+// モード設定 (0: キラキラ, 1: ぽわぽわバブル, 2: 釘/黒板ひっかき)
 let currentMode = 0;
 const modeBtn = document.getElementById('mode-btn');
 
 modeBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    currentMode = (currentMode + 1) % 2;
-    modeBtn.textContent = currentMode === 0 ? '✨' : '💧';
+    currentMode = (currentMode + 1) % 3; // 3種類で切り替え
+    if (currentMode === 0) modeBtn.textContent = '✨';
+    else if (currentMode === 1) modeBtn.textContent = '💧';
+    else if (currentMode === 2) modeBtn.textContent = '📍'; // 釘モード
 });
 
 class Particle {
@@ -78,7 +125,9 @@ class Particle {
         
         const angle = Math.random() * Math.PI * 2;
         // モードによるスピードの変化
-        const speed = Math.random() * (currentMode === 0 ? 6 : 3) + 1;
+        let speed = Math.random() * (currentMode === 0 ? 6 : 3) + 1;
+        if (currentMode === 2) speed = Math.random() * 8 + 2; // 釘モードは勢いよく飛ぶ
+        
         this.vx = Math.cos(angle) * speed;
         this.vy = Math.sin(angle) * speed;
         
@@ -87,7 +136,9 @@ class Particle {
         this.decay = Math.random() * 0.015 + 0.01;
         
         // モードによるサイズの変化
-        this.size = currentMode === 0 ? (Math.random() * 10 + 5) : (Math.random() * 35 + 15);
+        if (currentMode === 0) this.size = Math.random() * 10 + 5;
+        else if (currentMode === 1) this.size = Math.random() * 35 + 15;
+        else this.size = Math.random() * 5 + 2; // 釘モードは細かく鋭い破片
     }
     
     update() {
@@ -99,34 +150,42 @@ class Particle {
         this.vy *= 0.95;
         
         // 重力(少し下に落ちる)
-        this.vy += currentMode === 0 ? 0.08 : -0.02; // バブルモードは上にふわふわ
+        if (currentMode === 0) this.vy += 0.08;
+        else if (currentMode === 1) this.vy += -0.02;
+        else this.vy += 0.2; // 釘モードは破片が重く落ちる
         
         this.life -= this.decay;
-        // ※修正完了ポイント：サイズがマイナスにならないように安全装置を追加
         this.size = Math.max(0, this.size - 0.15);
     }
     
     draw() {
-        if(this.life <= 0 || this.size <= 0) return; // ※安全装置
+        if(this.life <= 0 || this.size <= 0) return;
         
         ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
         
         if (currentMode === 0) {
             // ✨ キラキラモード
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
             ctx.fillStyle = `hsla(${this.hue}, 100%, 65%, ${this.life})`;
             ctx.shadowBlur = 20;
             ctx.shadowColor = `hsl(${this.hue}, 100%, 50%)`;
-        } else {
+            ctx.fill();
+        } else if (currentMode === 1) {
             // 💧 ぽわぽわバブルモード
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
             const gradient = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size);
             gradient.addColorStop(0, `hsla(${this.hue}, 90%, 70%, ${this.life})`);
             gradient.addColorStop(1, `hsla(${this.hue}, 90%, 50%, 0)`);
             ctx.fillStyle = gradient;
             ctx.shadowBlur = 0;
+            ctx.fill();
+        } else {
+            // 📍 釘・黒板ひっかきモード (チョークの粉や傷跡のような描写)
+            ctx.fillStyle = `rgba(230, 240, 255, ${this.life})`;
+            // 尖った四角形（破砕片）を描画
+            ctx.fillRect(this.x, this.y, this.size * 0.5, this.size * 2);
+            ctx.shadowBlur = 0;
         }
-        
-        ctx.fill();
     }
 }
 
@@ -138,11 +197,12 @@ let isDrawing = false;
 let touches = {};
 
 function addParticles(x, y) {
-    globalHue = (globalHue + 2) % 360; // 色がゆっくり変化する
+    globalHue = (globalHue + 2) % 360; 
     
-    const count = currentMode === 0 ? 6 : 4;
+    let count = currentMode === 0 ? 6 : 4;
+    if (currentMode === 2) count = 10; // 釘モードはガリガリっと粉を多めに出す
+    
     for(let i=0; i<count; i++) {
-        // タッチ座標の周りにランダムにちりばめる
         const offsetX = (Math.random() - 0.5) * 20;
         const offsetY = (Math.random() - 0.5) * 20;
         particles.push(new Particle(x + offsetX, y + offsetY, globalHue + (Math.random() * 40 - 20)));
@@ -158,7 +218,7 @@ canvas.addEventListener('mousedown', (e) => {
 canvas.addEventListener('mousemove', (e) => {
     if(isDrawing) {
         addParticles(e.clientX, e.clientY);
-        if(Math.random() > 0.92) playNote(e.clientX, e.clientY); // ドラッグ中もたまに音を鳴らす
+        if(Math.random() > 0.92) playNote(e.clientX, e.clientY); 
     }
 });
 canvas.addEventListener('mouseup', () => isDrawing = false);
@@ -185,7 +245,6 @@ canvas.addEventListener('touchmove', (e) => {
         if(touches[t.identifier]) {
              const dx = t.clientX - touches[t.identifier].x;
              const dy = t.clientY - touches[t.identifier].y;
-             // 一定距離動いたら音を鳴らす（鳴りすぎ防止）
              if(Math.sqrt(dx*dx + dy*dy) > 30) {
                  if(Math.random() > 0.7) playNote(t.clientX, t.clientY);
                  touches[t.identifier] = {x: t.clientX, y: t.clientY};
@@ -208,17 +267,22 @@ canvas.addEventListener('touchcancel', (e) => {
 
 // アニメーションループ
 function animate() {
-    // 軌跡を残す（残像効果）
     if (currentMode === 0) {
         ctx.globalCompositeOperation = 'source-over';
         ctx.fillStyle = 'rgba(5, 5, 16, 0.25)';
         ctx.fillRect(0, 0, width, height);
-        ctx.globalCompositeOperation = 'lighter'; // 光るブレンド
-    } else {
+        ctx.globalCompositeOperation = 'lighter'; 
+    } else if (currentMode === 1) {
         ctx.globalCompositeOperation = 'source-over';
-        ctx.fillStyle = 'rgba(5, 5, 16, 0.35)'; // バブルは少し残像短め
+        ctx.fillStyle = 'rgba(5, 5, 16, 0.35)'; 
         ctx.fillRect(0, 0, width, height);
-        ctx.globalCompositeOperation = 'screen'; // やわらかいブレンド
+        ctx.globalCompositeOperation = 'screen'; 
+    } else {
+        // 釘モード (背景が急に暗くなるような演出)
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'; 
+        ctx.fillRect(0, 0, width, height);
+        ctx.globalCompositeOperation = 'source-over'; // 色と混ざらない生々しさ
     }
     
     for(let i = particles.length - 1; i >= 0; i--) {
@@ -230,7 +294,6 @@ function animate() {
         }
     }
     
-    // 何もしていない時でも少しだけパーティクルを出して「生きている」感を出す
     if(particles.length < 10 && Math.random() < 0.05) {
         globalHue = (globalHue + 1) % 360;
         particles.push(new Particle(Math.random() * width, Math.random() * height, globalHue));
@@ -239,7 +302,6 @@ function animate() {
     requestAnimationFrame(animate);
 }
 
-// 開始ボタンの処理
 document.getElementById('start-btn').addEventListener('click', () => {
     document.getElementById('start-overlay').classList.add('hidden');
     initAudio();
@@ -247,7 +309,6 @@ document.getElementById('start-btn').addEventListener('click', () => {
         audioCtx.resume();
     }
     
-    // オープニング演出
     setTimeout(() => {
         const cx = width / 2;
         const cy = height / 2;
