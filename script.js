@@ -102,11 +102,12 @@ class Particle {
         this.vy += currentMode === 0 ? 0.08 : -0.02; // バブルモードは上にふわふわ
         
         this.life -= this.decay;
-        if(this.size > 0.1) this.size -= 0.15;
+        // ※修正完了ポイント：サイズがマイナスにならないように安全装置を追加
+        this.size = Math.max(0, this.size - 0.15);
     }
     
     draw() {
-        if(this.life <= 0) return;
+        if(this.life <= 0 || this.size <= 0) return; // ※安全装置
         
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
